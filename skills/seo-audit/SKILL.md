@@ -16,7 +16,11 @@ metadata:
 
 1. **Render homepage**: use `python3 scripts/render_page.py <url> --mode auto --json` to capture raw HTML, rendered HTML, extracted text, SPA status, and accessibility data when needed
 2. **Detect business type**: analyze homepage signals per seo orchestrator
-3. **Crawl site**: follow internal links up to 500 pages, respect robots.txt
+3. **Crawl site**: if Firecrawl MCP available (check for `firecrawl_map` tool), use Firecrawl workflow:
+   - `firecrawl_map(url)` → discover all URLs (fast, credit-efficient)
+   - Filter to top 50–100 most important pages (homepage, key sections, top linked)
+   - `firecrawl_crawl(url, limit=100, scrapeOptions.formats=["markdown","html","links"])` → full content extraction with JS rendering
+   - Fallback when Firecrawl unavailable: follow internal links manually up to 500 pages, respect robots.txt
 4. **Delegate to subagents** (if available, otherwise run inline sequentially):
    - `seo-technical` -- robots.txt, sitemaps, canonicals, Core Web Vitals, security headers
    - `seo-content` -- E-E-A-T, readability, thin content, AI citation readiness
@@ -163,6 +167,19 @@ Write `{domain}-audit/audit-data.json` with this shape so `python3 scripts/googl
 - **High**: Significantly impacts rankings (fix within 1 week)
 - **Medium**: Optimization opportunity (fix within 1 month)
 - **Low**: Nice to have (backlog)
+
+## Firecrawl Integration (Optional)
+
+If Firecrawl MCP is available (`firecrawl_map` tool present), use it as the primary crawler:
+
+1. `firecrawl_map(url, limit=5000)` → full URL discovery, compare against XML sitemap to surface orphan/missing pages
+2. `firecrawl_crawl(url, limit=100)` → JS-rendered content extraction fed to all subagents
+3. Feed crawled markdown to `seo-content`, `seo-schema`, `seo-technical`, `seo-geo` agents
+4. Report total crawlable pages, URL pattern breakdown, and crawl depth in audit output
+
+**Credit awareness:** Inform user of estimated Firecrawl credit usage before large crawls (free tier: 500 credits/month; 1 credit per page crawled, 0.5 per URL mapped).
+
+**Fallback:** If Firecrawl unavailable or credits exhausted, use `fetch_page.py` + manual link following.
 
 ## DataForSEO Integration (Optional)
 

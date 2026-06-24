@@ -62,7 +62,7 @@ When the user invokes `/seo audit`, delegate to subagents in parallel:
 4. If local business detected, also spawn seo-local agent
 5. If local business detected AND DataForSEO MCP available, also spawn seo-maps agent
 6. If backlink APIs detected (`python3 scripts/backlinks_auth.py --check`), also spawn seo-backlinks agent
-7. If Firecrawl MCP available, use `firecrawl_map` to discover all site URLs before analysis
+7. If Firecrawl MCP available (`firecrawl_map` tool present): run `firecrawl_map` to discover all site URLs, then `firecrawl_crawl` (limit=100) for JS-rendered content extraction; feed crawled markdown to all subagents instead of raw fetch
 8. If content strategy signals detected (blog, pillar pages, topic clusters), also spawn seo-cluster agent
 9. If e-commerce detected, also spawn seo-ecommerce agent
 10. If drift baseline exists for this URL (`python3 scripts/drift_history.py <url>`), also spawn seo-drift agent
