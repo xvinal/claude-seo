@@ -1998,16 +1998,16 @@ def _build_methodology_footer(domain, timestamp):
 
 # ─── Report Assemblers ───────────────────────────────────────────────────────
 
-def generate_report(report_type, data, domain, output_dir, output_format="pdf"):
+def generate_report(report_type, data, domain, output_dir, output_format="html+docx"):
     """
-    Generate a complete professional PDF/HTML report.
+    Generate a complete professional SEO report.
 
     Args:
         report_type: 'cwv-audit', 'gsc-performance', 'indexation', or 'full'.
         data: Dictionary with all input data.
         domain: Domain name for the report header.
         output_dir: Directory for output files.
-        output_format: 'pdf', 'html', or 'both'.
+        output_format: 'pdf', 'html', 'xlsx', 'docx', 'html+docx' (default), 'both', or 'all'.
 
     Returns:
         Dictionary with output paths.
@@ -2316,7 +2316,7 @@ def generate_report(report_type, data, domain, output_dir, output_format="pdf"):
     safe_domain = domain.replace(":", "_").replace("/", "_")
     base_name = f"Google-SEO-Report-{safe_domain}-{report_type}"
 
-    if output_format in ("html", "both", "all"):
+    if output_format in ("html", "html+docx", "both", "all"):
         html_path = output_dir / f"{base_name}.html"
         with open(html_path, "w", encoding="utf-8") as f:
             f.write(html_content)
@@ -2338,6 +2338,12 @@ def generate_report(report_type, data, domain, output_dir, output_format="pdf"):
         xlsx_path = generate_xlsx(data, domain, report_type, output_dir)
         if xlsx_path:
             result["files"].append(xlsx_path)
+
+    if output_format in ("docx", "html+docx", "all"):
+        docx_path = output_dir / f"{base_name}.docx"
+        saved = _generate_docx_report(data, docx_path, domain, timestamp, charts_dir, report_type)
+        if saved:
+            result["files"].append(saved)
 
     return result
 
@@ -2391,6 +2397,346 @@ def _review_pdf(pdf_path: str, html_content: str) -> dict:
         review["status"] = f"WARN ({len(review['issues'])} issues)"
 
     return review
+
+
+# ─── DOCX Export ─────────────────────────────────────────────────────────────
+
+
+def _generate_docx_report(data, output_path, domain, timestamp, charts_dir, report_type="full"):
+    """Generate a Word .docx report from audit data using python-docx.
+
+    Mirrors the HTML/PDF report structure: title page, executive summary,
+    category sections with embedded chart PNGs, action plan with severity-coloured
+    rows, and a branded footer on every page.
+    """
+    try:
+        from docx import Document
+        from docx.shared import Inches, Pt, RGBColor, Cm
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.oxml.ns import qn
+        from docx.oxml import OxmlElement
+    except ImportError:
+        print(
+            "Warning: python-docx not installed. Skipping docx. Install: pip install python-docx",
+            file=sys.stderr,
+        )
+        return None
+
+    # ── Colour palette ────────────────────────────────────────────────────────
+    NAVY   = RGBColor(0x1E, 0x3A, 0x5F)
+    GOLD   = RGBColor(0xB8, 0x86, 0x0B)
+    GREEN  = RGBColor(0x2D, 0x6A, 0x4F)
+    AMBER  = RGBColor(0xD4, 0x74, 0x0E)
+    RED    = RGBColor(0xC5, 0x30, 0x30)
+    CREAM  = RGBColor(0xFA, 0xF9, 0xF7)
+    WHITE  = RGBColor(0xFF, 0xFF, 0xFF)
+    LGREY  = RGBColor(0xF2, 0xF2, 0xF2)
+
+    SEV_HEX = {
+        "critical": "C53030",
+        "high":     "D4740E",
+        "medium":   "1E3A5F",
+        "low":      "6B7280",
+        "info":     "6B7280",
+    }
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _set_cell_bg(cell, hex_color):
+        tc = cell._tc
+        tcPr = tc.get_or_add_tcPr()
+        shd = OxmlElement("w:shd")
+        shd.set(qn("w:fill"), hex_color.upper())
+        shd.set(qn("w:val"), "clear")
+        tcPr.append(shd)
+
+    def _set_cell_border(cell, color_hex="CCCCCC"):
+        tc = cell._tc
+        tcPr = tc.get_or_add_tcPr()
+        borders = OxmlElement("w:tcBorders")
+        for side in ("top", "left", "bottom", "right"):
+            el = OxmlElement(f"w:{side}")
+            el.set(qn("w:val"), "single")
+            el.set(qn("w:sz"), "4")
+            el.set(qn("w:color"), color_hex)
+            borders.append(el)
+        tcPr.append(borders)
+
+    def _header_row(table, headers, bg_hex="1E3A5F"):
+        row = table.rows[0]
+        for i, text in enumerate(headers):
+            cell = row.cells[i]
+            cell.text = text
+            _set_cell_bg(cell, bg_hex)
+            para = cell.paragraphs[0]
+            para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = para.runs[0] if para.runs else para.add_run(text)
+            run.text = text
+            run.bold = True
+            run.font.color.rgb = WHITE
+            run.font.size = Pt(9)
+
+    def _add_footer(doc, domain, ts):
+        for section in doc.sections:
+            footer = section.footer
+            p = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
+            p.clear()
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = p.add_run(f"{domain}  |  {ts}  |  claude-seo")
+            run.font.size = Pt(8)
+            run.font.color.rgb = RGBColor(0x99, 0x99, 0x99)
+
+    def _embed_chart(doc, chart_path, caption=""):
+        if chart_path and Path(chart_path).exists():
+            try:
+                doc.add_picture(str(chart_path), width=Inches(5.8))
+                last = doc.paragraphs[-1]
+                last.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                if caption:
+                    cap = doc.add_paragraph(caption)
+                    cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    cap.runs[0].font.size = Pt(8)
+                    cap.runs[0].font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+            except Exception:
+                pass
+
+    # ── Build document ────────────────────────────────────────────────────────
+    doc = Document()
+
+    # Page margins (2.54 cm all sides)
+    for sec in doc.sections:
+        sec.top_margin    = Cm(2.54)
+        sec.bottom_margin = Cm(2.54)
+        sec.left_margin   = Cm(2.54)
+        sec.right_margin  = Cm(2.54)
+
+    # Default body font
+    doc.styles["Normal"].font.name = "Times New Roman"
+    doc.styles["Normal"].font.size = Pt(11)
+
+    summary     = data.get("summary", {}) if isinstance(data.get("summary"), dict) else {}
+    categories  = data.get("categories", [])
+    action_plan = data.get("action_plan", {})
+    health_score = summary.get("health_score", "N/A")
+
+    # ── Title page ────────────────────────────────────────────────────────────
+    title_para = doc.add_paragraph()
+    title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = title_para.add_run("Full SEO Audit Report")
+    run.bold = True
+    run.font.size = Pt(28)
+    run.font.color.rgb = NAVY
+
+    doc.add_paragraph()
+
+    domain_para = doc.add_paragraph()
+    domain_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = domain_para.add_run(domain)
+    run.bold = True
+    run.font.size = Pt(18)
+    run.font.color.rgb = GOLD
+
+    doc.add_paragraph()
+
+    score_para = doc.add_paragraph()
+    score_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = score_para.add_run(f"SEO Health Score: {health_score}/100")
+    run.bold = True
+    run.font.size = Pt(16)
+    run.font.color.rgb = NAVY
+
+    doc.add_paragraph()
+
+    meta_para = doc.add_paragraph()
+    meta_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = meta_para.add_run(f"{timestamp}  |  Comprehensive Analysis  |  claude-seo")
+    run.font.size = Pt(10)
+    run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+
+    doc.add_page_break()
+
+    # ── Executive Summary ─────────────────────────────────────────────────────
+    h = doc.add_heading("Executive Summary", level=1)
+    h.runs[0].font.color.rgb = NAVY
+
+    # Score table
+    if categories:
+        doc.add_paragraph("Category Scores", style="Heading 2").runs[0].font.color.rgb = NAVY
+        tbl = doc.add_table(rows=1, cols=2)
+        tbl.style = "Table Grid"
+        _header_row(tbl, ["Category", "Score"])
+        for cat in categories:
+            row = tbl.add_row()
+            row.cells[0].text = cat.get("name", "")
+            score_val = cat.get("score", "N/A")
+            row.cells[1].text = str(score_val) if score_val != "N/A" else "N/A"
+            row.cells[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            for cell in row.cells:
+                _set_cell_border(cell)
+        doc.add_paragraph()
+
+    # Embed score gauge chart if present
+    gauge_path = str(charts_dir / "lighthouse_gauges.png")
+    _embed_chart(doc, gauge_path, "Figure 1. Lighthouse Score Gauges")
+
+    # Top findings
+    top_findings = summary.get("top_findings", [])
+    if top_findings:
+        doc.add_paragraph("Top Critical Findings", style="Heading 2").runs[0].font.color.rgb = NAVY
+        for i, f in enumerate(top_findings[:5], 1):
+            p = doc.add_paragraph(style="List Number")
+            if isinstance(f, dict):
+                run = p.add_run(f.get("title", str(f)))
+            else:
+                run = p.add_run(str(f))
+            run.font.size = Pt(11)
+
+    # Quick wins
+    quick_wins = summary.get("quick_wins", [])
+    if quick_wins:
+        doc.add_paragraph("Quick Wins", style="Heading 2").runs[0].font.color.rgb = NAVY
+        for win in quick_wins[:5]:
+            p = doc.add_paragraph(style="List Bullet")
+            if isinstance(win, dict):
+                run = p.add_run(win.get("title", str(win)))
+            else:
+                run = p.add_run(str(win))
+            run.font.size = Pt(11)
+
+    doc.add_page_break()
+
+    # ── Category Sections ─────────────────────────────────────────────────────
+    for i, cat in enumerate(categories, 1):
+        cat_name = cat.get("name", f"Category {i}")
+        cat_score = cat.get("score", "N/A")
+
+        h = doc.add_heading(f"{i}. {cat_name}", level=1)
+        h.runs[0].font.color.rgb = NAVY
+
+        score_p = doc.add_paragraph(f"Score: {cat_score}/100")
+        score_p.runs[0].bold = True
+        score_p.runs[0].font.color.rgb = NAVY
+
+        # What works
+        what_works = cat.get("what_works", [])
+        if what_works:
+            doc.add_paragraph("What Works", style="Heading 2").runs[0].font.color.rgb = GREEN
+            for item in what_works:
+                p = doc.add_paragraph(style="List Bullet")
+                p.add_run(str(item)).font.size = Pt(10)
+
+        # Findings table
+        findings = cat.get("findings", [])
+        if findings:
+            doc.add_paragraph("Findings", style="Heading 2").runs[0].font.color.rgb = NAVY
+            tbl = doc.add_table(rows=1, cols=3)
+            tbl.style = "Table Grid"
+            _header_row(tbl, ["Severity", "Finding", "Recommendation"])
+
+            # Set column widths
+            for j, width in enumerate([1.0, 2.8, 2.8]):
+                for cell in tbl.columns[j].cells:
+                    cell.width = Inches(width)
+
+            for finding in findings:
+                sev = finding.get("severity", "info").lower()
+                row = tbl.add_row()
+                row.cells[0].text = finding.get("severity", "")
+                row.cells[1].text = finding.get("title", finding.get("description", ""))[:200]
+                row.cells[2].text = finding.get("recommendation", "")[:200]
+                # Colour severity cell
+                hex_bg = SEV_HEX.get(sev, "6B7280")
+                _set_cell_bg(row.cells[0], hex_bg)
+                p = row.cells[0].paragraphs[0]
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                if p.runs:
+                    p.runs[0].bold = True
+                    p.runs[0].font.color.rgb = WHITE
+                    p.runs[0].font.size = Pt(9)
+                for cell in row.cells:
+                    _set_cell_border(cell)
+
+        doc.add_paragraph()
+
+        # Embed category chart if present (e.g. distributions)
+        if "performance" in cat_name.lower():
+            dist_path = str(charts_dir / "cwv_distributions.png")
+            _embed_chart(doc, dist_path, "Core Web Vitals Distributions")
+            tl_path = str(charts_dir / "cwv_timeline.png")
+            _embed_chart(doc, tl_path, "Core Web Vitals 25-Week Trend")
+
+        if i < len(categories):
+            doc.add_page_break()
+
+    # ── Action Plan ───────────────────────────────────────────────────────────
+    phases = action_plan.get("phases", [])
+    if phases:
+        doc.add_page_break()
+        h = doc.add_heading("Action Plan", level=1)
+        h.runs[0].font.color.rgb = NAVY
+
+        for phase in phases:
+            phase_name = phase.get("name", "")
+            timeframe  = phase.get("timeframe", "")
+            items      = phase.get("items", [])
+
+            doc.add_paragraph(f"{phase_name} — {timeframe}", style="Heading 2").runs[0].font.color.rgb = NAVY
+
+            if not items:
+                doc.add_paragraph("No items in this phase.").runs[0].font.size = Pt(10)
+                continue
+
+            tbl = doc.add_table(rows=1, cols=4)
+            tbl.style = "Table Grid"
+            _header_row(tbl, ["Severity", "Issue", "Fix", "Effort"])
+
+            for j, width in enumerate([0.9, 2.0, 2.5, 1.2]):
+                for cell in tbl.columns[j].cells:
+                    cell.width = Inches(width)
+
+            for item in items:
+                if isinstance(item, str):
+                    item = {"title": item, "severity": "low", "recommendation": "", "effort": ""}
+                sev = item.get("severity", item.get("priority", "low")).lower()
+                row = tbl.add_row()
+                row.cells[0].text = item.get("severity", item.get("priority", ""))
+                row.cells[1].text = item.get("title", item.get("issue", ""))[:150]
+                row.cells[2].text = item.get("recommendation", item.get("fix", ""))[:200]
+                row.cells[3].text = item.get("effort", "")
+                hex_bg = SEV_HEX.get(sev, "6B7280")
+                _set_cell_bg(row.cells[0], hex_bg)
+                p = row.cells[0].paragraphs[0]
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                if p.runs:
+                    p.runs[0].bold = True
+                    p.runs[0].font.color.rgb = WHITE
+                    p.runs[0].font.size = Pt(9)
+                for cell in row.cells:
+                    _set_cell_border(cell)
+            doc.add_paragraph()
+
+    # ── Methodology ───────────────────────────────────────────────────────────
+    doc.add_page_break()
+    h = doc.add_heading("Methodology", level=1)
+    h.runs[0].font.color.rgb = NAVY
+    doc.add_paragraph(
+        "This audit was generated by claude-seo using parallel specialist subagents covering "
+        "Technical SEO, Content Quality (E-E-A-T), Schema Markup, Performance (Core Web Vitals), "
+        "AI Search Readiness (GEO), Images, Semantic Clustering, Search Experience Optimization (SXO), "
+        "and Backlink Analysis. Scoring follows the weighted aggregate methodology documented in the "
+        "claude-seo SKILL.md. All findings are evidence-backed and falsifiable."
+    )
+
+    # ── Footer ────────────────────────────────────────────────────────────────
+    _add_footer(doc, domain, timestamp)
+
+    # ── Save ──────────────────────────────────────────────────────────────────
+    try:
+        doc.save(str(output_path))
+        return str(output_path)
+    except Exception as e:
+        print(f"Warning: docx save failed: {e}", file=sys.stderr)
+        return None
 
 
 # ─── XLSX Export ──────────────────────────────────────────────────────────────
@@ -2593,9 +2939,9 @@ def main():
     parser.add_argument("--output-dir", "-o", default=".", help="Output directory (default: current)")
     parser.add_argument(
         "--format", "-f",
-        choices=["pdf", "html", "xlsx", "both", "all"],
-        default="pdf",
-        help="Output format: pdf, html, xlsx, both (pdf+html), all (pdf+html+xlsx)",
+        choices=["pdf", "html", "xlsx", "docx", "html+docx", "both", "all"],
+        default="html+docx",
+        help="Output format: pdf, html, xlsx, docx, html+docx (default), both (pdf+html), all (pdf+html+xlsx+docx)",
     )
     parser.add_argument("--json", "-j", action="store_true", help="Output metadata as JSON")
 
@@ -2604,7 +2950,7 @@ def main():
     # Load data
     if args.data:
         try:
-            with open(args.data, "r") as f:
+            with open(args.data, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except (json.JSONDecodeError, IOError) as e:
             print(f"Error reading data file: {e}", file=sys.stderr)

@@ -14,13 +14,54 @@ metadata:
 
 ## Process
 
-1. **Render homepage**: use `python3 scripts/render_page.py <url> --mode auto --json` to capture raw HTML, rendered HTML, extracted text, SPA status, and accessibility data when needed
-2. **Detect business type**: analyze homepage signals per seo orchestrator
-3. **Crawl site**: if Firecrawl MCP available (check for `firecrawl_map` tool), use Firecrawl workflow:
+0. **Preflight Check** — run ALL checks before doing anything else. If any **required** check fails, print the diagnostic table and ABORT immediately. Do not crawl, do not spawn subagents.
+
+   **Required (abort if any fail):**
+   | Tool | Check |
+   |------|-------|
+   | Google API | `python3 scripts/google_auth.py --check --json` → `tier.tier >= 0` |
+   | Firecrawl MCP | `firecrawl_map` present in active tool list |
+   | DataForSEO MCP | `dataforseo_serp_google_organic_live_advanced` present in active tool list |
+   | Playwright | `python3 scripts/capture_screenshot.py --check` exits 0 |
+   | Semrush MCP | `mcp__claude_ai_Semrush__execute_report` present in active tool list |
+
+   **Optional (warn only, continue):**
+   | Tool | Check |
+   |------|-------|
+   | Moz API | `python3 scripts/backlinks_auth.py --check --json` → `services.moz.available = true` |
+   | Bing Webmaster | same → `services.bing.available = true` |
+
+   **On any required failure**, output this table and stop:
+   ```
+   ⛔ Preflight failed — audit cannot proceed.
+
+   | Tool           | Required | Status  | Fix                                                        |
+   |----------------|----------|---------|------------------------------------------------------------|
+   | Google API     | ✅ Yes   | ❌ FAIL | Add api_key to ~/.config/claude-seo/google-api.json        |
+   | Firecrawl MCP  | ✅ Yes   | ❌ FAIL | Run .\extensions\firecrawl\install.ps1 then restart Claude |
+   | DataForSEO MCP | ✅ Yes   | ❌ FAIL | Run .\extensions\dataforseo\install.ps1 then restart Claude|
+   | Playwright     | ✅ Yes   | ❌ FAIL | pip install playwright && playwright install chromium       |
+   | Semrush MCP    | ✅ Yes   | ❌ FAIL | Connect Semrush MCP in Claude settings                     |
+   | Moz API        | Optional | ⚠ WARN  | Add moz_api_key to ~/.config/claude-seo/backlinks-api.json |
+   | Bing Webmaster | Optional | ⚠ WARN  | Add bing_api_key + fix bing_verified_sites URL format      |
+
+   Fix the ❌ items above and re-run /seo audit.
+   ```
+
+   **On all required passing**, output:
+   ```
+   ✅ Preflight passed (5/5 required ready[, ⚠ N/2 optional unavailable — backlink data limited])
+   ```
+   Then proceed.
+
+1. **Load site context**: before any analysis, check for `contexts/{domain}/_site.md`. If it exists, load it as global brand/business context for the domain. Pass it to every subagent as pre-loaded background — agents must treat it as ground truth for business intent, personas, product details and competitive positioning and must not contradict it with generic assumptions. If no file exists, proceed without it.
+2. **Render homepage**: use `python3 scripts/render_page.py <url> --mode auto --json` to capture raw HTML, rendered HTML, extracted text, SPA status, and accessibility data when needed
+3. **Detect business type**: analyze homepage signals per seo orchestrator, informed by loaded context if available
+3. **Crawl site**: check for `firecrawl_map` tool in the active tool list. If present, use Firecrawl as the primary crawler:
    - `firecrawl_map(url)` → discover all URLs (fast, credit-efficient)
    - Filter to top 50–100 most important pages (homepage, key sections, top linked)
    - `firecrawl_crawl(url, limit=100, scrapeOptions.formats=["markdown","html","links"])` → full content extraction with JS rendering
-   - Fallback when Firecrawl unavailable: follow internal links manually up to 500 pages, respect robots.txt
+   - Fallback when `firecrawl_map` tool is not found: follow internal links manually up to 500 pages, respect robots.txt
 4. **Delegate to subagents** (if available, otherwise run inline sequentially):
    - `seo-technical` -- robots.txt, sitemaps, canonicals, Core Web Vitals, security headers
    - `seo-content` -- E-E-A-T, readability, thin content, AI citation readiness
@@ -28,7 +69,7 @@ metadata:
    - `seo-sitemap` -- structure analysis, quality gates, missing pages
    - `seo-performance` -- LCP, INP, CLS measurements
    - `seo-visual` -- screenshots, mobile testing, above-fold analysis
-   - `seo-geo` -- AI crawler access, llms.txt, citability, brand mention signals
+   - `seo-geo` -- AI crawler access, citability, brand mention signals
    - `seo-local` -- GBP signals, NAP consistency, reviews, local schema, industry-specific local factors (spawn when Local Service industry detected: brick-and-mortar, SAB, or hybrid business type)
    - `seo-maps` -- Geo-grid rank tracking, GBP audit, review intelligence, competitor radius mapping (spawn when Local Service detected AND DataForSEO MCP available)
    - `seo-google` -- CWV field data (CrUX), URL indexation (GSC), organic traffic (GA4) (spawn when Google API credentials detected via `python3 scripts/google_auth.py --check`)
@@ -37,6 +78,12 @@ metadata:
    - `seo-sxo` -- Search experience analysis: page-type mismatch, user stories, persona scoring (always include in full audits)
    - `seo-drift` -- Drift analysis: compare against stored baseline (spawn when drift baseline exists for the URL via `python3 scripts/drift_history.py <url>`)
    - `seo-ecommerce` -- Product schema, marketplace intelligence (spawn when E-commerce industry detected)
+   - `seo-dataforseo` -- Live SERP positions, keyword metrics, backlink spam scores, business listings, AI visibility (spawn when `dataforseo_serp_google_organic_live_advanced` tool is present in the active tool list). Do NOT use DataForSEO Lighthouse tools — PageSpeed MCP already covers CWV and Lighthouse scores.
+4b. **Semrush competitive enrichment** (run in parallel with subagents): if `execute_report` tool is present in the active tool list, call Semrush directly from the orchestrator:
+   - `overview_research(domain)` → organic traffic estimate, keyword count, authority score, referring domains
+   - `organic_research(domain)` → top 10 ranking keywords with position, volume, difficulty
+   - `backlink_research(domain)` → referring domain count, top anchors, authority distribution
+   - Inject these figures into the audit summary as a "Competitive Benchmarks" section. Label all data "Semrush (live)". Do not duplicate anything already covered by DataForSEO backlink data.
 5. **Score** -- aggregate into SEO Health Score (0-100)
 6. **Persist audit artifacts** -- write all outputs under `{domain}-audit/`
 7. **Report** -- generate prioritized action plan and optional PDF/HTML report
@@ -59,7 +106,7 @@ Delay between requests: 1 second
 - `{domain}-audit/audit-data.json`: Structured audit envelope for report generation
 - `{domain}-audit/findings/*.md`: Per-category specialist findings (`technical.md`, `content.md`, `schema.md`, `performance.md`, `visual.md`, etc.)
 - `{domain}-audit/screenshots/`: Desktop + mobile captures (if Playwright available)
-- **PDF Report** (recommended): Generate a professional A4 PDF using `scripts/google_report.py --type full --data {domain}-audit/audit-data.json --domain <domain> --output-dir {domain}-audit/`. This produces a white-cover enterprise report with TOC, executive summary, charts (Lighthouse gauges, query bars, index donut), metric cards, threshold tables, prioritized recommendations with effort estimates, and implementation roadmap. Always offer PDF generation after completing an audit.
+- **HTML + DOCX Report** (default): After every audit, run `python3 scripts/google_report.py --type full --data {domain}-audit/audit-data.json --domain <domain> --output-dir {domain}-audit/ --format html+docx`. This produces both a browser-viewable HTML report and a client-ready Word document (.docx) with embedded charts, severity-coloured action plan tables, and footer branding. Always generate both after completing an audit.
 
 ## Structured Audit Data Envelope
 

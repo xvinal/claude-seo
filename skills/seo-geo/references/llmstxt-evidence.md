@@ -30,12 +30,13 @@ adopts it.
 
 ## How claude-seo treats `llms.txt`
 
-- `seo-geo` audits **report presence** of `/llms.txt` and `/llms-full.txt`.
-- The audit notes whether the file is well-formed (Mintlify-style markdown).
-- The audit explicitly does **not** assign citation-ranking weight to it.
-- If the user asks to generate one, claude-seo produces a minimal valid
-  example and a banner stating "no major LLM provider has confirmed
-  consumption as of May 2026; ship for optionality, not for citation".
+- `seo-geo` audits do **not** check for or report on `/llms.txt` /
+  `/llms-full.txt` presence — it's removed from the audit process entirely
+  given the evidence above.
+- If the user explicitly asks to generate an `llms.txt` file, claude-seo
+  produces a minimal valid example and a banner stating "no major LLM
+  provider has confirmed consumption as of May 2026; ship for optionality,
+  not for citation".
 
 ## When this guidance changes
 

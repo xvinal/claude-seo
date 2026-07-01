@@ -4,7 +4,7 @@ description: >
   Optimize content for AI Overviews (formerly SGE), ChatGPT web search,
   Perplexity, and other AI-powered search experiences. Generative Engine
   Optimization (GEO) analysis including brand mention signals, AI crawler
-  accessibility, llms.txt compliance, passage-level citability scoring, and
+  accessibility, passage-level citability scoring, and
   platform-specific optimization. Use when user says "AI Overviews", "SGE",
   "GEO", "AI search", "LLM optimization", "Perplexity", "AI citations",
   "ChatGPT search", or "AI visibility".
@@ -141,7 +141,6 @@ Content with multi-modal elements sees **156% higher selection rates**.
 **Check for:**
 - Server-side rendering (SSR) vs client-only content
 - AI crawler access in robots.txt
-- llms.txt file presence and configuration
 - RSL 1.0 licensing terms
 
 ---
@@ -163,36 +162,6 @@ Check `robots.txt` for these AI crawlers:
 | cohere-ai | Cohere | Cohere models |
 
 **Recommendation:** Allow GPTBot, OAI-SearchBot, ClaudeBot, PerplexityBot for AI search visibility. Block CCBot and training crawlers if desired.
-
----
-
-## llms.txt Standard
-
-Read `references/llmstxt-evidence.md` for the primary-source evidence (Mueller, Illyes, SE Ranking 300k-domain study, OtterlyAI server-log audit) on why `/llms.txt` is not currently a citation lever for major AI search systems. claude-seo reports presence but assigns no citation-ranking weight.
-
-The emerging **llms.txt** standard provides AI crawlers with structured content guidance.
-
-**Location:** `/llms.txt` (root of domain)
-
-**Format:**
-```
-# Title of site
-> Brief description
-
-## Main sections
-- [Page title](url): Description
-- [Another page](url): Description
-
-## Optional: Key facts
-- Fact 1
-- Fact 2
-```
-
-**Check for:**
-- Presence of `/llms.txt`
-- Structured content guidance
-- Key page highlights
-- Contact/authority information
 
 ---
 
@@ -231,9 +200,8 @@ Generate `GEO-ANALYSIS.md` with:
 1. **GEO Readiness Score: XX/100**
 2. **Platform breakdown** (Google AIO, ChatGPT, Perplexity scores)
 3. **AI Crawler Access Status** (which crawlers allowed/blocked)
-4. **llms.txt Status** (present, missing, recommendations)
-5. **Brand Mention Analysis** (presence on Wikipedia, Reddit, YouTube, LinkedIn)
-6. **Passage-Level Citability** (optimal 134-167 word blocks identified)
+4. **Brand Mention Analysis** (presence on Wikipedia, Reddit, YouTube, LinkedIn, moneyhub.co.nz, canstar.co.nz)
+5. **Passage-Level Citability** (optimal 134-167 word blocks identified)
 7. **Server-Side Rendering Check** (JavaScript dependency analysis)
 8. **Top 5 Highest-Impact Changes**
 9. **Schema Recommendations** (for AI discoverability)
@@ -253,8 +221,7 @@ Generate `GEO-ANALYSIS.md` with:
 
 ## Medium Effort
 
-1. Create `/llms.txt` file
-2. Add author bio with credentials + Wikipedia/LinkedIn links
+1. Add author bio with credentials + Wikipedia/LinkedIn links
 3. Ensure server-side rendering for key content
 4. Build entity presence on Reddit, YouTube
 5. Add comparison tables with data
@@ -278,7 +245,6 @@ If DataForSEO MCP tools are available, use `ai_optimization_chat_gpt_scraper` to
 |----------|--------|
 | URL unreachable (DNS failure, connection refused) | Report the error clearly. Do not guess site content. Suggest the user verify the URL and try again. |
 | AI crawlers blocked by robots.txt | Report exactly which crawlers are blocked and which are allowed. Provide specific robots.txt directives to add for enabling AI search visibility. |
-| No llms.txt found | Note the absence and provide a ready-to-use llms.txt template based on the site's content structure. |
 | No structured data detected | Report the gap and provide specific schema recommendations (Article, Organization, Person) for improving AI discoverability. |
 
 ## FLOW Framework Integration
